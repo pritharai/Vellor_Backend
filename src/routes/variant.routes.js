@@ -9,11 +9,13 @@ const {
   getVariantById,
 } = require("../controllers/variant.controller");
 const verifyJWT = require("../middlewares/auth.middleware");
+const restrictToAdmin = require('../middlewares/restrictToAdmin')
+
+router.get("/", getVariants);
+router.get("/:id", getVariantById);
 router.use(verifyJWT)
+router.use(restrictToAdmin);
 router.post("/", upload.single("image"), createVariant);
 router.patch("/:id", upload.single("image"), updateVariant);
 router.delete("/:id", deleteVariant);
-router.get("/", getVariants);
-router.get("/:id", getVariantById);
-
 module.exports = router;
