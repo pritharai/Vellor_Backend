@@ -610,6 +610,31 @@ const deleteAddress = asyncHandler(async (req, res) => {
     .json(new APIResponse(200, {}, "Address deleted successfully"));
 });
 
+const getAllAddresses = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user?._id);
+  if (!user) throw new APIError(401, "Invalid Access token");
+  if (user.address.length === 0) {
+    return res.status(200).json(new APIResponse(200, {}, "No Addresses found"));
+  }
+  res
+    .status(200)
+    .json(new APIResponse(200, user.address, "Addresses fetched successfully"));
+});
+
+const getAddressById = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const user = await User.findById(req.user?._id);
+  if (!user) throw new APIError(401, "Invalid Access token");
+  const address = user.address.id(id);
+  if (!address) {
+    throw new APIError(404, "Address not found");
+  }
+
+  res
+    .status(200)
+    .json(new APIResponse(200, address, "Address fetched successfully"));
+});
+
 module.exports = {
   register_user,
   resend_otp,
@@ -624,5 +649,7 @@ module.exports = {
   updateUserProfile,
   addAddress,
   updateAddress,
-  deleteAddress
+  deleteAddress,
+  getAllAddresses,
+  getAddressById
 };

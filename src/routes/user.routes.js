@@ -13,6 +13,8 @@ const {
   addAddress,
   updateAddress,
   deleteAddress,
+  getAddressById,
+  getAllAddresses
 } = require("../controllers/user.controller");
 const verifyJWT = require("../middlewares/auth.middleware");
 const router = require("express").Router();
@@ -29,6 +31,8 @@ router.get("/me", verifyJWT, getUserProfile);
 router.post("/refresh_access_token", refreshAccessToken);
 router.post("/update_userProfile", verifyJWT, updateUserProfile);
 router.post("/add_address", verifyJWT, addAddress);
+router.get("/address", verifyJWT,getAllAddresses );
+router.get("/address/:id", verifyJWT,getAddressById );
 router.patch("/update_address/:id", verifyJWT, updateAddress);
 router.delete("/delete_address/:id", verifyJWT, deleteAddress);
 module.exports = router;
