@@ -42,8 +42,7 @@ const createOrder = asyncHandler(async (req, res) => {
       throw new APIError(400, "Invalid Address ID");
     }
     orderShippingAddress = {
-      type: "addressDetails",
-      addressDetails: {
+      
         houseNumber: address.houseNumber,
         street: address.street,
         colony: address.colony,
@@ -51,16 +50,13 @@ const createOrder = asyncHandler(async (req, res) => {
         state: address.state,
         country: address.country,
         postalCode: address.postalCode,
-      },
-    };
+      };
   } else if (shippingAddress) {
     const { houseNumber, street, colony, city, state, country, postalCode } = shippingAddress;
     if (!houseNumber || !street || !colony || !city || !state || !country || !postalCode) {
       throw new APIError(400, "Complete shipping address is required");
     }
     orderShippingAddress = {
-      type: "addressDetails",
-      addressDetails: {
         houseNumber,
         street,
         colony,
@@ -68,7 +64,6 @@ const createOrder = asyncHandler(async (req, res) => {
         state,
         country,
         postalCode,
-      },
     };
   } else {
     const defaultAddress = user.address.find((addr) => addr.isDefault);
@@ -76,8 +71,6 @@ const createOrder = asyncHandler(async (req, res) => {
       throw new APIError(400, "No default address set and no address provided");
     }
     orderShippingAddress = {
-      type: "addressDetails",
-      addressDetails: {
         houseNumber: defaultAddress.houseNumber,
         street: defaultAddress.street,
         colony: defaultAddress.colony,
@@ -85,7 +78,6 @@ const createOrder = asyncHandler(async (req, res) => {
         state: defaultAddress.state,
         country: defaultAddress.country,
         postalCode: defaultAddress.postalCode,
-      },
     };
   }
 
@@ -182,6 +174,7 @@ const createOrder = asyncHandler(async (req, res) => {
           razorpayOrderId: razorpayOrder ? razorpayOrder.id : null,
           shippingAddress: orderShippingAddress,
           expectedDelivery,
+          paymentMethod
         },
       ],
       { session }
