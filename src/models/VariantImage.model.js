@@ -25,8 +25,6 @@ const variantImageSchema = new mongoose.Schema({
   },
 });
 
-variantImageSchema.index({ variant: 1 });
-
 const VariantImage = mongoose.model('VariantImage', variantImageSchema);
 
 module.exports = VariantImage;
