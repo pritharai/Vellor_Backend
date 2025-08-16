@@ -8,8 +8,9 @@ const crypto = require("crypto");
 const mongoose = require("mongoose");
 const asyncHandler = require("../utils/API/asyncHandler");
 const APIError = require("../utils/API/APIError");
-const APIResponse = require("../utils/API/APIResponse");
-const { sendEmail } = require("../utils/email");
+const APIResponse = require("../utils/API/APIResponse"); 
+const transporter = require("../utils/services/nodemailer.config");
+
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -224,7 +225,7 @@ const createOrder = asyncHandler(async (req, res) => {
           </p>
         </div>`,
     };
-    await sendEmail(orderConfirmedMail);
+    await transporter.sendMail(orderConfirmedMail);
 
     res
       .status(201)
@@ -318,7 +319,7 @@ const verifyPayment = asyncHandler(async (req, res) => {
         </p>
       </div>`,
   };
-  await sendEmail(orderConfirmedMail);
+  await transporter.sendMail(orderConfirmedMail);
 
   res.json(
     new APIResponse(
@@ -465,7 +466,7 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
           </p>
         </div>`,
     };
-    await sendEmail(orderShippedMail);
+    await transporter.sendMail(orderShippedMail);
   } else if (status === "delivered") {
     const orderDeliveredMail = {
       from: process.env.NODEMAILER_USER,
@@ -486,7 +487,7 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
           </p>
         </div>`,
     };
-    await sendEmail(orderDeliveredMail);
+    await transporter.sendMail(orderDeliveredMail);
   }
 
   res.json(
@@ -602,7 +603,7 @@ const requestOrderCancellation = asyncHandler(async (req, res) => {
         </p>
       </div>`,
   };
-  await sendEmail(cancellationRequestMail);
+  await transporter.sendMail(cancellationRequestMail);
 
   res.json(
     new APIResponse(
