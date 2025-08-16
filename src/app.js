@@ -21,6 +21,7 @@ const cartRoutes = require("./routes/cart.routes");
 const contactRoutes = require("./routes/contact.routes");
 const orderRoutes = require("./routes/order.routes");
 const variantImageRoutes = require('./routes/variantImage.routes')
+const dashboardRoutes = require('./routes/dashboard.routes')
 app.use(express.json({ limit: "16kb" }));
 app.use(express.urlencoded({ limit: "16kb" }));
 app.use(cookieParser());
@@ -35,5 +36,6 @@ app.use("/api/v1/cart", cartRoutes);
 app.use("/api/v1/contact", contactRoutes);
 app.use("/api/v1/order", orderRoutes);
 app.use("/api/v1/images", variantImageRoutes);
+app.use("/api/v1/dashboard", dashboardRoutes);
 app.use(errorMiddleware);
 module.exports = { app };
