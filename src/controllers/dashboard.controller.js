@@ -2,8 +2,8 @@ const Order = require("../models/Order.model");
 const asyncHandler = require("../utils/API/asyncHandler");
 const APIError = require("../utils/API/APIError");
 const APIResponse = require("../utils/API/APIResponse");
-const User = require('../models/User.model')
-const Product = require('../models/Product.model')
+const User = require("../models/User.model");
+const Product = require("../models/Product.model");
 
 const mostActiveUsers = asyncHandler(async (req, res) => {
   const { limit = 10, sortBy = "orderCount" } = req.query;
@@ -184,7 +184,6 @@ const recentOrders = asyncHandler(async (req, res) => {
 const dashboardStats = asyncHandler(async (req, res) => {
   const { startDate, endDate } = req.body;
 
-
   if (startDate || endDate) {
     if (!startDate || !endDate) {
       throw new APIError(
@@ -199,7 +198,6 @@ const dashboardStats = asyncHandler(async (req, res) => {
     }
   }
 
-
   const dateFilter =
     startDate && endDate
       ? {
@@ -209,7 +207,6 @@ const dashboardStats = asyncHandler(async (req, res) => {
           },
         }
       : {};
-
 
   const totalOrders = await Order.countDocuments(dateFilter);
   const totalCustomers = await User.countDocuments({ role: "customer" });
@@ -226,7 +223,7 @@ const dashboardStats = asyncHandler(async (req, res) => {
   const totalRevenue =
     revenueResult.length > 0 ? revenueResult[0].totalRevenue : 0;
 
-    const ordersByStatus = await Order.aggregate([
+  const ordersByStatus = await Order.aggregate([
     { $match: dateFilter },
     {
       $group: {
@@ -243,7 +240,6 @@ const dashboardStats = asyncHandler(async (req, res) => {
     },
   ]);
 
-  
   const ordersByMethod = await Order.aggregate([
     { $match: dateFilter },
     {
@@ -287,9 +283,66 @@ const dashboardStats = asyncHandler(async (req, res) => {
   );
 });
 
+const getOrdersByUser = asyncHandler(async (req, res) => {
+  const { userId, email } = req.body;
+  const { limit = 10, page = 1 } = req.query;
+
+  if (!userId && !email) {
+    throw new APIError(400, "Either userId or email is required");
+  }
+  if (userId && email) {
+    throw new APIError(400, "Provide either userId or email, not both");
+  }
+  let user;
+  if (userId) {
+    if (!mongoose.isValidObjectId(userId)) {
+      throw new APIError(400, "Invalid userId format");
+    }
+    user = await User.findById(userId).select("_id name email");
+  } else {
+    user = await User.findOne({ email }).select("_id name email");
+  }
+
+  if (!user) {
+    throw new APIError(404, "User not found");
+  }
+  const skip = (parseInt(page) - 1) * parseInt(limit);
+
+  const orders = await Order.find({ user: user._id })
+    .populate({
+      path: "items.variant",
+      populate: [
+        { path: "product", select: "name description" },
+        { path: "color", select: "name hex" },
+      ],
+    })
+    .populate("user", "name email")
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(parseInt(limit))
+    .lean();
+
+  const totalOrders = await Order.countDocuments({ user: user._id });
+
+  res.json(
+    new APIResponse(
+      200,
+      {
+        user: { userId: user._id, name: user.name, email: user.email },
+        orders,
+        totalOrders,
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(totalOrders / parseInt(limit)),
+      },
+      "Orders retrieved successfully"
+    )
+  );
+});
+
 module.exports = {
   mostActiveUsers,
   mostPurchasedProducts,
   recentOrders,
   dashboardStats,
+  getOrdersByUser,
 };
