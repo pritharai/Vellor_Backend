@@ -10,6 +10,7 @@ const {
 } = require("../controllers/dashboard.controller");
 
 router.use(verifyJWT)
+router.use(restrictToAdmin)
 router.post('/stats', dashboardStats)
 router.get('/users', mostActiveUsers)
 router.get('/products', mostPurchasedProducts)

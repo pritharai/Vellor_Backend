@@ -1,4 +1,4 @@
-const mongoose = require('mongoose')
+const mongoose = require("mongoose");
 const Product = require("../models/Product.model");
 const Variant = require("../models/Variant.model");
 const Review = require("../models/Review.model");
@@ -63,17 +63,23 @@ const getProductIds = asyncHandler(async (req, res) => {
 });
 
 const getProducts = asyncHandler(async (req, res) => {
-  const { search, color, minPrice, maxPrice } = req.query;
+  const { search, color, minPrice, maxPrice, limit = 10, page = 1 } = req.query;
+  const skip = (parseInt(page) - 1) * parseInt(limit);
 
   const productQuery = {};
   if (search) {
     productQuery.$text = { $search: search };
   }
 
-  const products = await Product.find(productQuery).lean();
+  const products = await Product.find(productQuery)
+    .skip(skip)
+    .limit(parseInt(limit))
+    .lean();
   if (products.length === 0) {
     return res.json(new APIResponse(200, [], "No products found"));
   }
+  const totalProducts = await Product.countDocuments(productQuery);
+  const totalPages = Math.ceil(totalProducts / parseInt(limit));
 
   const productIds = products.map((p) => p._id);
   const variantQuery = { product: { $in: productIds } };
@@ -132,7 +138,11 @@ const getProducts = asyncHandler(async (req, res) => {
   res.json(
     new APIResponse(
       200,
-      productsWithVariants,
+      { products: productsWithVariants ,
+        totalProducts,
+        currentPage: parseInt(page),
+        totalPages
+      },
       "Products retrieved successfully"
     )
   );

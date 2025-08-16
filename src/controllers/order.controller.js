@@ -14,7 +14,6 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
-
 const createOrder = asyncHandler(async (req, res) => {
   const { itemIds, addressId, paymentMethod, shippingAddress } = req.body;
   const userId = req.user?._id;
@@ -29,7 +28,6 @@ const createOrder = asyncHandler(async (req, res) => {
     throw new APIError(400, "Invalid Payment Method");
   }
 
-
   let orderShippingAddress;
   const user = await User.findById(userId).select("address");
   if (!user) {
@@ -42,28 +40,36 @@ const createOrder = asyncHandler(async (req, res) => {
       throw new APIError(400, "Invalid Address ID");
     }
     orderShippingAddress = {
-      
-        houseNumber: address.houseNumber,
-        street: address.street,
-        colony: address.colony,
-        city: address.city,
-        state: address.state,
-        country: address.country,
-        postalCode: address.postalCode,
-      };
+      houseNumber: address.houseNumber,
+      street: address.street,
+      colony: address.colony,
+      city: address.city,
+      state: address.state,
+      country: address.country,
+      postalCode: address.postalCode,
+    };
   } else if (shippingAddress) {
-    const { houseNumber, street, colony, city, state, country, postalCode } = shippingAddress;
-    if (!houseNumber || !street || !colony || !city || !state || !country || !postalCode) {
+    const { houseNumber, street, colony, city, state, country, postalCode } =
+      shippingAddress;
+    if (
+      !houseNumber ||
+      !street ||
+      !colony ||
+      !city ||
+      !state ||
+      !country ||
+      !postalCode
+    ) {
       throw new APIError(400, "Complete shipping address is required");
     }
     orderShippingAddress = {
-        houseNumber,
-        street,
-        colony,
-        city,
-        state,
-        country,
-        postalCode,
+      houseNumber,
+      street,
+      colony,
+      city,
+      state,
+      country,
+      postalCode,
     };
   } else {
     const defaultAddress = user.address.find((addr) => addr.isDefault);
@@ -71,13 +77,13 @@ const createOrder = asyncHandler(async (req, res) => {
       throw new APIError(400, "No default address set and no address provided");
     }
     orderShippingAddress = {
-        houseNumber: defaultAddress.houseNumber,
-        street: defaultAddress.street,
-        colony: defaultAddress.colony,
-        city: defaultAddress.city,
-        state: defaultAddress.state,
-        country: defaultAddress.country,
-        postalCode: defaultAddress.postalCode,
+      houseNumber: defaultAddress.houseNumber,
+      street: defaultAddress.street,
+      colony: defaultAddress.colony,
+      city: defaultAddress.city,
+      state: defaultAddress.state,
+      country: defaultAddress.country,
+      postalCode: defaultAddress.postalCode,
     };
   }
 
@@ -92,7 +98,9 @@ const createOrder = asyncHandler(async (req, res) => {
 
     // Calculate expected delivery date
     const expectedDelivery = new Date();
-    expectedDelivery.setDate(expectedDelivery.getDate() + Number(process.env.EXPECTED_DELIVERY));
+    expectedDelivery.setDate(
+      expectedDelivery.getDate() + Number(process.env.EXPECTED_DELIVERY)
+    );
 
     // Function to prepare order items & calculate total
     const prepareOrderItems = async (items) => {
@@ -156,7 +164,10 @@ const createOrder = asyncHandler(async (req, res) => {
         const variant = await Variant.findById(item.variant).session(session);
         if (variant) {
           const currentStock = variant.quantity.get(item.size) || 0;
-          variant.quantity.set(item.size, Math.max(0, currentStock - item.quantity));
+          variant.quantity.set(
+            item.size,
+            Math.max(0, currentStock - item.quantity)
+          );
           await variant.save({ session });
         }
       }
@@ -170,11 +181,12 @@ const createOrder = asyncHandler(async (req, res) => {
           items: orderItems,
           totalAmount,
           status: selectedPaymentMethod === "cod" ? "processing" : "pending",
-          paymentStatus: selectedPaymentMethod === "cod" ? "completed" : "pending",
+          paymentStatus:
+            selectedPaymentMethod === "cod" ? "completed" : "pending",
           razorpayOrderId: razorpayOrder ? razorpayOrder.id : null,
           shippingAddress: orderShippingAddress,
           expectedDelivery,
-          paymentMethod
+          paymentMethod,
         },
       ],
       { session }
@@ -193,21 +205,25 @@ const createOrder = asyncHandler(async (req, res) => {
     await session.commitTransaction();
 
     // Populate order for response
-    const populatedOrder = await Order.findById(order[0]._id).populate({
-      path: "items.variant",
-      populate: [
-        { path: "product", select: "name description" },
-        { path: "color", select: "name hex" },
-      ],
-    }).lean();
+    const populatedOrder = await Order.findById(order[0]._id)
+      .populate({
+        path: "items.variant",
+        populate: [
+          { path: "product", select: "name description" },
+          { path: "color", select: "name hex" },
+        ],
+      })
+      .lean();
 
-    res.status(201).json(
-      new APIResponse(
-        201,
-        { order: populatedOrder, razorpayOrder },
-        "Order created successfully. Proceed to payment."
-      )
-    );
+    res
+      .status(201)
+      .json(
+        new APIResponse(
+          201,
+          { order: populatedOrder, razorpayOrder },
+          "Order created successfully. Proceed to payment."
+        )
+      );
   } catch (error) {
     await session.abortTransaction();
     throw error;
@@ -234,7 +250,8 @@ const verifyPayment = asyncHandler(async (req, res) => {
     throw new APIError(403, "You can only verify your own order");
   }
 
-  const generatedSignature = crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+  const generatedSignature = crypto
+    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
     .update(`${order.razorpayOrderId}|${razorpayPaymentId}`)
     .digest("hex");
 
@@ -252,30 +269,41 @@ const verifyPayment = asyncHandler(async (req, res) => {
     const variant = await Variant.findById(item.variant);
     if (variant) {
       const currentStock = variant.quantity.get(item.size) || 0;
-      variant.quantity.set(item.size, Math.max(0, currentStock - item.quantity));
+      variant.quantity.set(
+        item.size,
+        Math.max(0, currentStock - item.quantity)
+      );
       await variant.save();
     }
   }
 
   await order.save();
 
-
-  const populatedOrder = await Order.findById(order._id).populate({
-    path: "items.variant",
-    populate: [
-      { path: "product", select: "name description" },
-      { path: "color", select: "name hex" },
-    ],
-  }).lean();
+  const populatedOrder = await Order.findById(order._id)
+    .populate({
+      path: "items.variant",
+      populate: [
+        { path: "product", select: "name description" },
+        { path: "color", select: "name hex" },
+      ],
+    })
+    .lean();
 
   if (populatedOrder.shippingAddress.type === "addressId") {
     const user = await User.findById(userId).select("address");
-    populatedOrder.shippingAddress.addressDetails = user.address.id(populatedOrder.shippingAddress.addressId);
+    populatedOrder.shippingAddress.addressDetails = user.address.id(
+      populatedOrder.shippingAddress.addressId
+    );
   }
 
-  res.json(new APIResponse(200, populatedOrder, "Payment verified and order processed successfully"));
+  res.json(
+    new APIResponse(
+      200,
+      populatedOrder,
+      "Payment verified and order processed successfully"
+    )
+  );
 });
-
 
 const getUserOrders = asyncHandler(async (req, res) => {
   const userId = req.user?._id;
@@ -284,19 +312,23 @@ const getUserOrders = asyncHandler(async (req, res) => {
     throw new APIError(401, "You must be logged in to view orders");
   }
 
-  const orders = await Order.find({ user: userId }).populate({
-    path: "items.variant",
-    populate: [
-      { path: "product", select: "name description" },
-      { path: "color", select: "name hex" },
-    ],
-  }).sort({ createdAt: -1 }).lean();
-
+  const orders = await Order.find({ user: userId })
+    .populate({
+      path: "items.variant",
+      populate: [
+        { path: "product", select: "name description" },
+        { path: "color", select: "name hex" },
+      ],
+    })
+    .sort({ createdAt: -1 })
+    .lean();
 
   const user = await User.findById(userId).select("address");
   for (const order of orders) {
     if (order.shippingAddress.type === "addressId") {
-      order.shippingAddress.addressDetails = user.address.id(order.shippingAddress.addressId);
+      order.shippingAddress.addressDetails = user.address.id(
+        order.shippingAddress.addressId
+      );
     }
   }
 
@@ -304,37 +336,77 @@ const getUserOrders = asyncHandler(async (req, res) => {
 });
 
 const getAllOrders = asyncHandler(async (req, res) => {
-  const { status, startDate, endDate } = req.query;
+  const { status, startDate, endDate, limit = 10, page = 1 } = req.query;
+  const skip = (parseInt(page) - 1) * parseInt(limit);
+
+  const validStatuses = [
+    "pending",
+    "processing",
+    "shipped",
+    "delivered",
+    "cancelled",
+  ];
+  if (status && !validStatuses.includes(status)) {
+    throw new APIError(400, "Invalid status filter");
+  }
+  if (startDate && isNaN(new Date(startDate).getTime())) {
+    throw new APIError(400, "Invalid startDate format");
+  }
+  if (endDate && isNaN(new Date(endDate).getTime())) {
+    throw new APIError(400, "Invalid endDate format");
+  }
+  if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
+    throw new APIError(400, "startDate cannot be after endDate");
+  }
 
   const query = {};
-  if (status) {
-    query.status = status;
-  }
-  if (startDate) {
-    query.createdAt = { $gte: new Date(startDate) };
-  }
+  if (status) query.status = status;
+  if (startDate) query.createdAt = { $gte: new Date(startDate) };
   if (endDate) {
     query.createdAt = query.createdAt || {};
     query.createdAt.$lte = new Date(endDate);
   }
 
-  const orders = await Order.find(query).populate({
-    path: "items.variant",
-    populate: [
-      { path: "product", select: "name description" },
-      { path: "color", select: "name hex" },
-    ],
-  }).populate("user", "name email").sort({ createdAt: -1 }).lean();
-
+  const orders = await Order.find(query)
+    .populate({
+      path: "items.variant",
+      populate: [
+        { path: "product", select: "name description" },
+        { path: "color", select: "name hex" },
+      ],
+    })
+    .populate("user", "name email")
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(parseInt(limit))
+    .lean();
 
   for (const order of orders) {
-    if (order.shippingAddress.type === "addressId") {
+    if (order.shippingAddress && order.shippingAddress.type === "addressId") {
       const user = await User.findById(order.user._id).select("address");
-      order.shippingAddress.addressDetails = user.address.id(order.shippingAddress.addressId);
+      if (user && user.address) {
+        order.shippingAddress.addressDetails = user.address.id(
+          order.shippingAddress.addressId
+        );
+      }
     }
   }
 
-  res.json(new APIResponse(200, orders, "All orders retrieved successfully"));
+  const totalOrders = await Order.countDocuments(query);
+  const totalPages = Math.ceil(totalOrders / parseInt(limit));
+
+  res.json(
+    new APIResponse(
+      200,
+      {
+        orders,
+        totalOrders,
+        currentPage: parseInt(page),
+        totalPages,
+      },
+      "All orders retrieved successfully"
+    )
+  );
 });
 
 const updateOrderStatus = asyncHandler(async (req, res) => {
@@ -357,21 +429,26 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
   order.status = status;
   await order.save();
 
-
-  const populatedOrder = await Order.findById(order._id).populate({
-    path: "items.variant",
-    populate: [
-      { path: "product", select: "name description" },
-      { path: "color", select: "name hex" },
-    ],
-  }).lean();
+  const populatedOrder = await Order.findById(order._id)
+    .populate({
+      path: "items.variant",
+      populate: [
+        { path: "product", select: "name description" },
+        { path: "color", select: "name hex" },
+      ],
+    })
+    .lean();
 
   if (populatedOrder.shippingAddress.type === "addressId") {
     const user = await User.findById(populatedOrder.user).select("address");
-    populatedOrder.shippingAddress.addressDetails = user.address.id(populatedOrder.shippingAddress.addressId);
+    populatedOrder.shippingAddress.addressDetails = user.address.id(
+      populatedOrder.shippingAddress.addressId
+    );
   }
 
-  res.json(new APIResponse(200, populatedOrder, "Order status updated successfully"));
+  res.json(
+    new APIResponse(200, populatedOrder, "Order status updated successfully")
+  );
 });
 
 module.exports = {

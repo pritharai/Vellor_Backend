@@ -170,61 +170,91 @@ const deleteVariant = asyncHandler(async (req, res) => {
 });
 
 const getVariants = asyncHandler(async (req, res) => {
-  const { productId, size, color, minPrice, maxPrice, search } = req.query;
-  const query = {};
+  const { productId, size, color, minPrice, maxPrice, search, limit = 10, page = 1 } = req.query;
 
+  // Validate inputs
+  if (productId && !mongoose.isValidObjectId(productId)) {
+    throw new APIError(400, "Invalid productId format");
+  }
+  if (minPrice && isNaN(parseFloat(minPrice))) {
+    throw new APIError(400, "minPrice must be a valid number");
+  }
+  if (maxPrice && isNaN(parseFloat(maxPrice))) {
+    throw new APIError(400, "maxPrice must be a valid number");
+  }
+  if (minPrice && maxPrice && parseFloat(minPrice) > parseFloat(maxPrice)) {
+    throw new APIError(400, "minPrice cannot be greater than maxPrice");
+  }
+
+  const skip = (parseInt(page) - 1) * parseInt(limit);
+
+  const query = {};
   if (productId) {
     query.product = productId;
     const product = await Product.findById(productId);
     if (!product) throw new APIError(404, "Product not found");
   }
-
-  if (color)
+  if (color) {
     query.color = {
       $in: await Color.find({
         name: { $regex: color, $options: "i" },
       }).distinct("_id"),
     };
-
+  }
   if (minPrice) query.price = { $gte: parseFloat(minPrice) };
   if (maxPrice) {
     query.price = query.price || {};
     query.price.$lte = parseFloat(maxPrice);
   }
-
   if (search) {
-    const colorIds = await Color.find({ $text: { $search: search } }).distinct(
-      "_id"
-    );
+    const colorIds = await Color.find({ $text: { $search: search } }).distinct("_id");
     if (colorIds.length > 0) {
       query.color = query.color
         ? { $in: [...query.color.$in, ...colorIds] }
         : { $in: colorIds };
     }
   }
+  if (size) {
+    query[`quantity.${size}`] = { $gt: 0 };
+  }
 
   const variants = await Variant.find(query)
     .populate("color", "hex name")
-    .populate("product", "name description");
+    .populate("product", "name description")
+    .skip(skip)
+    .limit(parseInt(limit))
+    .lean();
+
+  const totalVariants = await Variant.countDocuments(query);
+  const totalPages = Math.ceil(totalVariants / parseInt(limit));
+
   if (variants.length === 0) {
-    return res.json(new APIResponse(200, [], "No variants found"));
-  }
-
-  if (size) {
-    const filteredVariants = variants.filter(
-      (variant) => variant.quantity[size]
-    );
-    if (filteredVariants.length === 0) {
-      return res.json(
-        new APIResponse(200, [], "No variants found for the specified size")
-      );
-    }
     return res.json(
-      new APIResponse(200, filteredVariants, "Variants retrieved successfully")
+      new APIResponse(
+        200,
+        {
+          variants: [],
+          totalVariants: 0,
+          currentPage: parseInt(page),
+          totalPages: 0,
+        },
+        "No variants found"
+      )
     );
   }
 
-  res.json(new APIResponse(200, variants, "Variants retrieved successfully"));
+  res.json(
+    new APIResponse(
+      200,
+      {
+        variants,
+        totalVariants,
+        currentPage: parseInt(page),
+        totalPages,
+      },
+      "Variants retrieved successfully"
+    )
+  );
 });
 
 const getVariantById = asyncHandler(async (req, res) => {
