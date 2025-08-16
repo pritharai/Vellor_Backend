@@ -2,12 +2,14 @@ const Order = require("../models/Order.model");
 const Cart = require("../models/Cart.model");
 const Variant = require("../models/Variant.model");
 const User = require("../models/User.model");
+const Product = require("../models/Product.model");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 const asyncHandler = require("../utils/API/asyncHandler");
 const APIError = require("../utils/API/APIError");
 const APIResponse = require("../utils/API/APIResponse");
+const { sendEmail } = require("../utils/email");
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -29,7 +31,7 @@ const createOrder = asyncHandler(async (req, res) => {
   }
 
   let orderShippingAddress;
-  const user = await User.findById(userId).select("address");
+  const user = await User.findById(userId).select("address name email");
   if (!user) {
     throw new APIError(404, "User not found");
   }
@@ -96,21 +98,18 @@ const createOrder = asyncHandler(async (req, res) => {
       throw new APIError(404, "Cart not found");
     }
 
-    // Calculate expected delivery date
     const expectedDelivery = new Date();
     expectedDelivery.setDate(
       expectedDelivery.getDate() + Number(process.env.EXPECTED_DELIVERY)
     );
 
-    // Function to prepare order items & calculate total
     const prepareOrderItems = async (items) => {
       let totalAmount = 0;
       let orderItems = [];
-
       for (const item of items) {
         const variant = await Variant.findById(item.variant).session(session);
-        if (!variant) throw new APIError(404, "Variant not found");
-
+        if (!variant)
+          throw new APIError(404, `Variant ${item.variant} not found`);
         const stock = variant.quantity.get(item.size) || 0;
         if (stock < item.quantity) {
           throw new APIError(
@@ -118,7 +117,6 @@ const createOrder = asyncHandler(async (req, res) => {
             `Insufficient stock for size ${item.size} of variant ${variant._id}. Available: ${stock}`
           );
         }
-
         totalAmount += item.quantity * variant.price;
         orderItems.push({
           variant: item.variant,
@@ -127,11 +125,9 @@ const createOrder = asyncHandler(async (req, res) => {
           price: variant.price,
         });
       }
-
       return { totalAmount, orderItems };
     };
 
-    // Decide if "Buy Now" or full cart
     let selectedItems = [];
     if (itemIds && itemIds.length > 0) {
       selectedItems = cart.items.filter((item) =>
@@ -145,10 +141,8 @@ const createOrder = asyncHandler(async (req, res) => {
       selectedItems = cart.items;
     }
 
-    // Prepare data
     const { totalAmount, orderItems } = await prepareOrderItems(selectedItems);
 
-    // Razorpay order only if online
     let razorpayOrder = null;
     if (selectedPaymentMethod === "online") {
       razorpayOrder = await razorpay.orders.create({
@@ -158,7 +152,6 @@ const createOrder = asyncHandler(async (req, res) => {
       });
     }
 
-    // Update stock for COD orders
     if (selectedPaymentMethod === "cod") {
       for (const item of orderItems) {
         const variant = await Variant.findById(item.variant).session(session);
@@ -173,7 +166,6 @@ const createOrder = asyncHandler(async (req, res) => {
       }
     }
 
-    // Create the order
     const order = await Order.create(
       [
         {
@@ -186,13 +178,12 @@ const createOrder = asyncHandler(async (req, res) => {
           razorpayOrderId: razorpayOrder ? razorpayOrder.id : null,
           shippingAddress: orderShippingAddress,
           expectedDelivery,
-          paymentMethod,
+          paymentMethod: selectedPaymentMethod,
         },
       ],
       { session }
     );
 
-    // Remove from cart
     if (itemIds && itemIds.length > 0) {
       cart.items = cart.items.filter(
         (item) => !itemIds.includes(item._id.toString())
@@ -204,7 +195,6 @@ const createOrder = asyncHandler(async (req, res) => {
 
     await session.commitTransaction();
 
-    // Populate order for response
     const populatedOrder = await Order.findById(order[0]._id)
       .populate({
         path: "items.variant",
@@ -214,6 +204,27 @@ const createOrder = asyncHandler(async (req, res) => {
         ],
       })
       .lean();
+
+    const orderConfirmedMail = {
+      from: process.env.NODEMAILER_USER,
+      to: user.email,
+      subject: "Your Order is Confirmed",
+      html: `
+        <div style="max-width: 500px; margin: auto; padding: 20px; background: #ffffff; border: 1px solid #ddd; border-radius: 10px; font-family: Arial, sans-serif;">
+          <h2 style="text-align: center; color: #28a745;">Order Confirmed ✅</h2>
+          <p style="font-size: 16px; color: #555;">
+            Hello, ${user.name}<br/><br/>
+            Thank you for shopping with us! Your order <strong>#${order[0]._id}</strong> has been successfully confirmed.
+          </p>
+          <p style="font-size: 14px; color: #888;">
+            We’ll notify you once it is shipped.
+          </p>
+          <p style="font-size: 14px; color: #aaa; margin-top: 30px;">
+            – Vellor Team
+          </p>
+        </div>`,
+    };
+    await sendEmail(orderConfirmedMail);
 
     res
       .status(201)
@@ -232,7 +243,6 @@ const createOrder = asyncHandler(async (req, res) => {
   }
 });
 
-// Verify payment (unchanged)
 const verifyPayment = asyncHandler(async (req, res) => {
   const { orderId, razorpayPaymentId, razorpaySignature } = req.body;
   const userId = req.user?._id;
@@ -264,7 +274,6 @@ const verifyPayment = asyncHandler(async (req, res) => {
   order.paymentStatus = "completed";
   order.status = "processing";
 
-  // Reduce stock in variants
   for (const item of order.items) {
     const variant = await Variant.findById(item.variant);
     if (variant) {
@@ -289,12 +298,27 @@ const verifyPayment = asyncHandler(async (req, res) => {
     })
     .lean();
 
-  if (populatedOrder.shippingAddress.type === "addressId") {
-    const user = await User.findById(userId).select("address");
-    populatedOrder.shippingAddress.addressDetails = user.address.id(
-      populatedOrder.shippingAddress.addressId
-    );
-  }
+  const user = await User.findById(userId).select("name email");
+  const orderConfirmedMail = {
+    from: process.env.NODEMAILER_USER,
+    to: user.email,
+    subject: "Your Order is Confirmed",
+    html: `
+      <div style="max-width: 500px; margin: auto; padding: 20px; background: #ffffff; border: 1px solid #ddd; border-radius: 10px; font-family: Arial, sans-serif;">
+        <h2 style="text-align: center; color: #28a745;">Order Confirmed ✅</h2>
+        <p style="font-size: 16px; color: #555;">
+          Hello, ${user.name}<br/><br/>
+          Thank you for shopping with us! Your order <strong>#${order._id}</strong> has been successfully confirmed.
+        </p>
+        <p style="font-size: 14px; color: #888;">
+          We’ll notify you once it is shipped.
+        </p>
+        <p style="font-size: 14px; color: #aaa; margin-top: 30px;">
+          – Vellor Team
+        </p>
+      </div>`,
+  };
+  await sendEmail(orderConfirmedMail);
 
   res.json(
     new APIResponse(
@@ -322,15 +346,6 @@ const getUserOrders = asyncHandler(async (req, res) => {
     })
     .sort({ createdAt: -1 })
     .lean();
-
-  const user = await User.findById(userId).select("address");
-  for (const order of orders) {
-    if (order.shippingAddress.type === "addressId") {
-      order.shippingAddress.addressDetails = user.address.id(
-        order.shippingAddress.addressId
-      );
-    }
-  }
 
   res.json(new APIResponse(200, orders, "User orders retrieved successfully"));
 });
@@ -381,17 +396,6 @@ const getAllOrders = asyncHandler(async (req, res) => {
     .limit(parseInt(limit))
     .lean();
 
-  for (const order of orders) {
-    if (order.shippingAddress && order.shippingAddress.type === "addressId") {
-      const user = await User.findById(order.user._id).select("address");
-      if (user && user.address) {
-        order.shippingAddress.addressDetails = user.address.id(
-          order.shippingAddress.addressId
-        );
-      }
-    }
-  }
-
   const totalOrders = await Order.countDocuments(query);
   const totalPages = Math.ceil(totalOrders / parseInt(limit));
 
@@ -426,6 +430,7 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     throw new APIError(400, "Cannot update status for this order");
   }
 
+  const user = await User.findById(order.user).select("name email");
   order.status = status;
   await order.save();
 
@@ -439,15 +444,172 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     })
     .lean();
 
-  if (populatedOrder.shippingAddress.type === "addressId") {
-    const user = await User.findById(populatedOrder.user).select("address");
-    populatedOrder.shippingAddress.addressDetails = user.address.id(
-      populatedOrder.shippingAddress.addressId
-    );
+  if (status === "shipped") {
+    const trackingId = `TRACK${order._id.toString().slice(-6)}`; // Placeholder; replace with actual tracking logic
+    const orderShippedMail = {
+      from: process.env.NODEMAILER_USER,
+      to: user.email,
+      subject: "Your Order is Shipped",
+      html: `
+        <div style="max-width: 500px; margin: auto; padding: 20px; background: #ffffff; border: 1px solid #ddd; border-radius: 10px; font-family: Arial, sans-serif;">
+          <h2 style="text-align: center; color: #007bff;">Order Shipped 🚚</h2>
+          <p style="font-size: 16px; color: #555;">
+            Hello, ${user.name}<br/><br/>
+            Good news! Your order <strong>#${order._id}</strong> has been shipped.
+          </p>
+          <p style="font-size: 14px; color: #888;">
+            Track your package using the tracking ID: <strong>${trackingId}</strong>.
+          </p>
+          <p style="font-size: 14px; color: #aaa; margin-top: 30px;">
+            – Vellor Team
+          </p>
+        </div>`,
+    };
+    await sendEmail(orderShippedMail);
+  } else if (status === "delivered") {
+    const orderDeliveredMail = {
+      from: process.env.NODEMAILER_USER,
+      to: user.email,
+      subject: "Your Order has been Delivered",
+      html: `
+        <div style="max-width: 500px; margin: auto; padding: 20px; background: #ffffff; border: 1px solid #ddd; border-radius: 10px; font-family: Arial, sans-serif;">
+          <h2 style="text-align: center; color: #28a745;">Order Delivered 🎉</h2>
+          <p style="font-size: 16px; color: #555;">
+            Hello, ${user.name}<br/><br/>
+            Your order <strong>#${order._id}</strong> has been successfully delivered.
+          </p>
+          <p style="font-size: 14px; color: #888;">
+            We hope you enjoy your purchase! Don’t forget to leave a review.
+          </p>
+          <p style="font-size: 14px; color: #aaa; margin-top: 30px;">
+            – Vellor Team
+          </p>
+        </div>`,
+    };
+    await sendEmail(orderDeliveredMail);
   }
 
   res.json(
     new APIResponse(200, populatedOrder, "Order status updated successfully")
+  );
+});
+
+const requestOrderCancellation = asyncHandler(async (req, res) => {
+  const { orderId, reason } = req.body;
+  const userId = req.user?._id;
+
+  if (!userId) {
+    throw new APIError(401, "You must be logged in to request cancellation");
+  }
+  if (!orderId || !mongoose.isValidObjectId(orderId)) {
+    throw new APIError(400, "Valid orderId is required");
+  }
+  if (!reason || typeof reason !== "string" || reason.trim().length === 0) {
+    throw new APIError(400, "Cancellation reason is required");
+  }
+
+  const order = await Order.findById(orderId);
+  if (!order) {
+    throw new APIError(404, "Order not found");
+  }
+  if (order.user.toString() !== userId.toString()) {
+    throw new APIError(
+      403,
+      "You can only request cancellation for your own order"
+    );
+  }
+  if (order.status === "cancelled" || order.status === "delivered") {
+    throw new APIError(400, "Order cannot be cancelled");
+  }
+  if (order.cancellationRequest.requested) {
+    throw new APIError(400, "Cancellation request already submitted");
+  }
+
+  order.cancellationRequest = {
+    requested: true,
+    reason: reason.trim(),
+    requestedAt: new Date(),
+  };
+  await order.save();
+
+  const user = await User.findById(userId).select("name email phone");
+  const populatedOrder = await Order.findById(order._id)
+    .populate({
+      path: "items.variant",
+      populate: [
+        { path: "product", select: "name description" },
+        { path: "color", select: "name hex" },
+      ],
+    })
+    .lean();
+
+  const cancellationRequestMail = {
+    from: process.env.NODEMAILER_USER,
+    to: process.env.ADMIN_EMAIL,
+    subject: `Order Cancellation Request #${order._id}`,
+    html: `
+      <div style="max-width: 600px; margin: auto; padding: 20px; background: #ffffff; border: 1px solid #ddd; border-radius: 10px; font-family: Arial, sans-serif;">
+        <h2 style="text-align: center; color: #dc3545;">Order Cancellation Request</h2>
+        <p style="font-size: 16px; color: #555;">
+          A cancellation request has been submitted for order <strong>#${
+            order._id
+          }</strong>.
+        </p>
+        <h3 style="color: #333;">Order Details:</h3>
+        <ul style="font-size: 14px; color: #555;">
+          <li><strong>User:</strong> ${user.name} (${user.email}, ${
+      user.phone || "N/A"
+    })</li>
+          <li><strong>Order ID:</strong> ${order._id}</li>
+          <li><strong>Total Amount:</strong> ₹${order.totalAmount}</li>
+          <li><strong>Payment Method:</strong> ${order.paymentMethod}</li>
+          <li><strong>Status:</strong> ${order.status}</li>
+          <li><strong>Cancellation Reason:</strong> ${
+            order.cancellationRequest.reason
+          }</li>
+          <li><strong>Requested At:</strong> ${order.cancellationRequest.requestedAt.toISOString()}</li>
+        </ul>
+        <h3 style="color: #333;">Items:</h3>
+        <ul style="font-size: 14px; color: #555;">
+          ${populatedOrder.items
+            .map(
+              (item) => `
+            <li>
+              ${item.variant.product.name} (${item.variant.color.name}, ${item.size}) - 
+              Quantity: ${item.quantity}, Price: ₹${item.price}
+            </li>`
+            )
+            .join("")}
+        </ul>
+        <h3 style="color: #333;">Shipping Address:</h3>
+        <p style="font-size: 14px; color: #555;">
+          ${populatedOrder.shippingAddress.houseNumber}, ${
+      populatedOrder.shippingAddress.street
+    }, 
+          ${populatedOrder.shippingAddress.colony}, ${
+      populatedOrder.shippingAddress.city
+    }, 
+          ${populatedOrder.shippingAddress.state}, ${
+      populatedOrder.shippingAddress.country
+    }, 
+          ${populatedOrder.shippingAddress.postalCode}
+        </p>
+        <p style="font-size: 14px; color: #888;">
+          Please review the request and update the order status accordingly.
+        </p>
+        <p style="font-size: 14px; color: #aaa; margin-top: 30px;">
+          – Vellor Admin
+        </p>
+      </div>`,
+  };
+  await sendEmail(cancellationRequestMail);
+
+  res.json(
+    new APIResponse(
+      200,
+      populatedOrder,
+      "Cancellation request submitted successfully"
+    )
   );
 });
 
@@ -457,4 +619,5 @@ module.exports = {
   getUserOrders,
   getAllOrders,
   updateOrderStatus,
+  requestOrderCancellation,
 };

@@ -184,103 +184,74 @@ const recentOrders = asyncHandler(async (req, res) => {
 const dashboardStats = asyncHandler(async (req, res) => {
   const { startDate, endDate } = req.body;
 
-  if (startDate || endDate) {
-    if (!startDate || !endDate) {
-      throw new APIError(
-        400,
-        "Both startDate and endDate are required for date filtering"
-      );
-    }
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
-      throw new APIError(400, "Invalid date range");
-    }
+  if (startDate && isNaN(new Date(startDate).getTime())) {
+    throw new APIError(400, "Invalid startDate format");
+  }
+  if (endDate && isNaN(new Date(endDate).getTime())) {
+    throw new APIError(400, "Invalid endDate format");
+  }
+  if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
+    throw new APIError(400, "Invalid date range");
+  }
+  if ((startDate && !endDate) || (!startDate && endDate)) {
+    throw new APIError(400, "Both startDate and endDate are required for date filtering");
   }
 
-  const dateFilter =
-    startDate && endDate
-      ? {
-          createdAt: {
-            $gte: new Date(startDate),
-            $lte: new Date(endDate),
-          },
-        }
-      : {};
+  const query = {};
+  if (startDate && endDate) {
+    query.createdAt = {
+      $gte: new Date(startDate),
+      $lte: new Date(endDate),
+    };
+  }
 
-  const totalOrders = await Order.countDocuments(dateFilter);
+  const totalOrders = await Order.countDocuments(query);
   const totalCustomers = await User.countDocuments({ role: "customer" });
   const totalProducts = await Product.countDocuments();
-  const revenueResult = await Order.aggregate([
-    { $match: { ...dateFilter, paymentStatus: "completed" } },
-    {
-      $group: {
-        _id: null,
-        totalRevenue: { $sum: "$totalAmount" },
-      },
-    },
-  ]);
-  const totalRevenue =
-    revenueResult.length > 0 ? revenueResult[0].totalRevenue : 0;
 
   const ordersByStatus = await Order.aggregate([
-    { $match: dateFilter },
-    {
-      $group: {
-        _id: "$status",
-        count: { $sum: 1 },
-      },
-    },
-    {
-      $project: {
-        _id: 0,
-        status: "$_id",
-        count: 1,
-      },
-    },
+    { $match: query },
+    { $group: { _id: "$status", count: { $sum: 1 } } },
+    { $project: { _id: 0, status: "$_id", count: 1 } },
   ]);
 
   const ordersByMethod = await Order.aggregate([
-    { $match: dateFilter },
-    {
-      $group: {
-        _id: "$paymentMethod",
-        count: { $sum: 1 },
-      },
-    },
-    {
-      $project: {
-        _id: 0,
-        method: "$_id",
-        count: 1,
-      },
-    },
+    { $match: query },
+    { $group: { _id: "$paymentMethod", count: { $sum: 1 } } },
+    { $project: { _id: 0, method: "$_id", count: 1 } },
+  ]);
+
+  const cancellationRequests = await Order.countDocuments({
+    ...query,
+    "cancellationRequest.requested": true,
+  });
+
+  const totalRevenue = await Order.aggregate([
+    { $match: { ...query, paymentStatus: "completed" } },
+    { $group: { _id: null, total: { $sum: "$totalAmount" } } },
+    { $project: { _id: 0, total: 1 } },
   ]);
 
   const stats = {
     totalOrders,
     totalCustomers,
     totalProducts,
-    totalRevenue,
-    ordersByStatus: ordersByStatus.reduce(
-      (acc, { status, count }) => {
-        acc[status] = count;
-        return acc;
-      },
-      { pending: 0, processing: 0, shipped: 0, delivered: 0, cancelled: 0 }
-    ),
-    ordersByMethod: ordersByMethod.reduce(
-      (acc, { method, count }) => {
-        acc[method] = count;
-        return acc;
-      },
-      { cod: 0, online: 0 }
-    ),
+    totalRevenue: totalRevenue[0]?.total || 0,
+    ordersByStatus: {
+      pending: ordersByStatus.find(s => s.status === "pending")?.count || 0,
+      processing: ordersByStatus.find(s => s.status === "processing")?.count || 0,
+      shipped: ordersByStatus.find(s => s.status === "shipped")?.count || 0,
+      delivered: ordersByStatus.find(s => s.status === "delivered")?.count || 0,
+      cancelled: ordersByStatus.find(s => s.status === "cancelled")?.count || 0,
+    },
+    ordersByMethod: {
+      cod: ordersByMethod.find(m => m.method === "cod")?.count || 0,
+      online: ordersByMethod.find(m => m.method === "online")?.count || 0,
+    },
+    cancellationRequests,
   };
 
-  res.json(
-    new APIResponse(200, stats, "Dashboard stats retrieved successfully")
-  );
+  res.json(new APIResponse(200, stats, "Dashboard stats retrieved successfully"));
 });
 
 const getOrdersByUser = asyncHandler(async (req, res) => {

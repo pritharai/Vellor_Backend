@@ -106,6 +106,19 @@ const orderSchema = new Schema(
         required: true,
       },
     },
+    cancellationRequest: {
+      requested: {
+        type: Boolean,
+        default: false,
+      },
+      reason: {
+        type: String,
+        trim: true,
+      },
+      requestedAt: {
+        type: Date,
+      },
+    },
   },
   { timestamps: true }
 );
